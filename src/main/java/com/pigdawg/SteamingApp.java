@@ -30,6 +30,8 @@ public class SteamingApp {
 
     private static final long RESOURCE_CREATE_TIMEOUT_MS = Duration.ofMinutes(5).toMillis();
     private static final long RESOURCE_DELETE_TIMEOUT_MS = Duration.ofMinutes(5).toMillis();
+    private static final int MESSAGE_COUNT = 10;
+    private static final long CONSUMER_TIMEOUT_MS = Duration.ofMinutes(2).toMillis();
 
     public static void main(String[] args) throws IOException, InterruptedException, ExecutionException {
         LOG.info("SteamingApp starting");
@@ -79,8 +81,7 @@ public class SteamingApp {
             OciStreamingHelper.waitForStreamToBecomeActive(adminClient, streamId, RESOURCE_CREATE_TIMEOUT_MS);
 
             final long startMs = System.currentTimeMillis();
-            final long producerDeadlineMs = startMs + 10_000;
-            final long consumerDeadlineMs = startMs + 15_000;
+            final long consumerDeadlineMs = startMs + CONSUMER_TIMEOUT_MS;
 
             ProducerConsumerThreads producerConsumerThreads =
                     new ProducerConsumerThreads(
@@ -91,7 +92,7 @@ public class SteamingApp {
                             KAFKA_PASSWORD,
                             KAFKA_TRUSTSTORE_LOCATION,
                             KAFKA_TRUSTSTORE_PASSWORD,
-                            producerDeadlineMs,
+                            MESSAGE_COUNT,
                             consumerDeadlineMs);
             Thread producerThread = producerConsumerThreads.createProducerThread();
             Thread consumerThread = producerConsumerThreads.createConsumerThread();

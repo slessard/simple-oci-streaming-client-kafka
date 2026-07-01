@@ -10,6 +10,14 @@ These instructions apply to the entire repository.
 
 This is a small Java 17 Maven project named `simple-oci-streaming-client-kafka`. It demonstrates OCI Streaming through the Kafka-compatible API.
 
+## Paired Example Consistency
+
+- This repository is paired with `https://github.com/slessard/simple-oci-streaming-client-rest`.
+- Keep the REST and Kafka examples as similar as possible so readers can compare the two OCI Streaming APIs directly.
+- When behavior is shared, prefer identical names, method order, control flow, logging shape, constants, and helper structure across both repositories.
+- Allow differences only where the REST and Kafka APIs require them, such as cursor handling, Kafka topic creation, client configuration, and stream ID resolution.
+- When changing one repository, inspect the paired repository and make the corresponding change there whenever it applies.
+
 Key files:
 
 - `pom.xml` - Maven build, Java version, dependencies, and `exec-maven-plugin` configuration.
@@ -17,7 +25,7 @@ Key files:
 - `src/main/java/com/pigdawg/SteamingApp.java` - application entry point that provisions a stream pool, resolves Kafka bootstrap servers, creates a topic via Kafka `CREATE_TOPICS`, runs producer/consumer threads, and cleans up.
 - `src/main/java/com/pigdawg/KafkaStreamingHelper.java` - Kafka AdminClient, producer, consumer, SASL, SSL, and username helpers.
 - `src/main/java/com/pigdawg/ProducerConsumerThreads.java` - Kafka producer/consumer thread coordination.
-- `src/main/java/com/pigdawg/OciStreamingHelper.java` - minimal OCI helper methods for authentication validation, stream pool lifecycle, resolving Kafka-created streams, and cleanup.
+- `src/main/java/com/pigdawg/OciStreamingHelper.java` - OCI helper methods for authentication validation, stream pool lifecycle, resolving Kafka-created streams, and cleanup.
 - `src/main/resources/logback.xml` - Logback console logging configuration.
 - `src/main/resources/application.properties` - local OCI/Kafka configuration; intentionally ignored by Git.
 

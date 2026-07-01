@@ -17,7 +17,6 @@ final class ProducerConsumerThreads {
     private static final Logger LOG = LoggerFactory.getLogger(ProducerConsumerThreads.class);
 
     private static final Duration CONSUMER_POLL_TIMEOUT = Duration.ofSeconds(1);
-    private static final long PRODUCER_START_WAIT_MS = 5_000;
     private static final long PRODUCER_SEND_PAUSE_MS = 200;
 
     private final String bootstrapServers;
@@ -27,12 +26,11 @@ final class ProducerConsumerThreads {
     private final String password;
     private final String truststoreLocation;
     private final String truststorePassword;
-    private final long producerDeadlineMs;
+    private final int messageCount;
     private final long consumerDeadlineMs;
     private final AtomicInteger producedCount = new AtomicInteger(0);
     private final AtomicInteger consumedCount = new AtomicInteger(0);
     private final AtomicBoolean producerDone = new AtomicBoolean(false);
-    private final AtomicBoolean consumerReady = new AtomicBoolean(false);
     private final AtomicReference<Exception> threadFailure = new AtomicReference<>();
 
     ProducerConsumerThreads(
@@ -43,7 +41,7 @@ final class ProducerConsumerThreads {
             String password,
             String truststoreLocation,
             String truststorePassword,
-            long producerDeadlineMs,
+            int messageCount,
             long consumerDeadlineMs) {
         this.bootstrapServers = bootstrapServers;
         this.topic = topic;
@@ -52,7 +50,7 @@ final class ProducerConsumerThreads {
         this.password = password;
         this.truststoreLocation = truststoreLocation;
         this.truststorePassword = truststorePassword;
-        this.producerDeadlineMs = producerDeadlineMs;
+        this.messageCount = messageCount;
         this.consumerDeadlineMs = consumerDeadlineMs;
     }
 
@@ -67,6 +65,7 @@ final class ProducerConsumerThreads {
     void throwIfFailed() {
         Exception failure = threadFailure.get();
         if (failure == null) {
+            throwIfMessagesWereNotDrained();
             return;
         }
 
@@ -87,9 +86,7 @@ final class ProducerConsumerThreads {
                             truststoreLocation,
                             truststorePassword))) {
                 LOG.info("Kafka producer thread started for topic={}", topic);
-                waitForConsumerReadiness();
-                while (System.currentTimeMillis() < producerDeadlineMs) {
-                    int sequence = producedCount.get() + 1;
+                for (int sequence = 1; sequence <= messageCount; sequence++) {
                     String payload = "message-" + sequence;
                     producer.send(new ProducerRecord<>(topic, "demo-key", payload)).get();
                     producedCount.incrementAndGet();
@@ -121,15 +118,14 @@ final class ProducerConsumerThreads {
 
                 while (System.currentTimeMillis() < consumerDeadlineMs) {
                     ConsumerRecords<String, String> records = consumer.poll(CONSUMER_POLL_TIMEOUT);
-                    consumerReady.set(true);
                     if (!records.isEmpty()) {
-                        LOG.debug("Kafka consumer received {} records in batch", records.count());
+                        LOG.debug("Kafka consumer received {} messages in batch", records.count());
                         for (ConsumerRecord<String, String> record : records) {
                             int totalConsumed = consumedCount.incrementAndGet();
                             LOG.info("Consumed ({}) : {}", totalConsumed, record.value());
                         }
                     } else {
-                        LOG.debug("Kafka consumer poll returned no records");
+                        LOG.debug("Kafka consumer poll returned no messages");
                     }
 
                     if (producerDone.get() && consumedCount.get() >= producedCount.get()) {
@@ -165,14 +161,12 @@ final class ProducerConsumerThreads {
         }
     }
 
-    private void waitForConsumerReadiness() throws InterruptedException {
-        long deadlineMs = System.currentTimeMillis() + PRODUCER_START_WAIT_MS;
-        while (!consumerReady.get() && System.currentTimeMillis() < deadlineMs) {
-            Thread.sleep(100);
-        }
-
-        if (!consumerReady.get()) {
-            LOG.warn("Kafka producer starting before consumer readiness was observed. topic={}", topic);
+    private void throwIfMessagesWereNotDrained() {
+        int produced = producedCount.get();
+        int consumed = consumedCount.get();
+        if (consumed < produced) {
+            throw new IllegalStateException(
+                    "Kafka consumer did not drain produced messages. produced=" + produced + " consumed=" + consumed);
         }
     }
 }
