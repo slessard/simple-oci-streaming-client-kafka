@@ -2,9 +2,13 @@ package com.pigdawg;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
@@ -32,6 +36,7 @@ final class ProducerConsumerThreads {
     private final AtomicInteger consumedCount = new AtomicInteger(0);
     private final AtomicBoolean producerDone = new AtomicBoolean(false);
     private final AtomicReference<Exception> threadFailure = new AtomicReference<>();
+    private final Set<String> consumedMessages = ConcurrentHashMap.newKeySet();
 
     ProducerConsumerThreads(
             String bootstrapServers,
@@ -121,6 +126,7 @@ final class ProducerConsumerThreads {
                     if (!records.isEmpty()) {
                         LOG.debug("Kafka consumer received {} messages in batch", records.count());
                         for (ConsumerRecord<String, String> record : records) {
+                            consumedMessages.add(record.value());
                             int totalConsumed = consumedCount.incrementAndGet();
                             LOG.info("Consumed ({}) : {}", totalConsumed, record.value());
                         }
@@ -164,9 +170,19 @@ final class ProducerConsumerThreads {
     private void throwIfMessagesWereNotDrained() {
         int produced = producedCount.get();
         int consumed = consumedCount.get();
-        if (consumed < produced) {
+        Set<String> expectedMessages = expectedMessages();
+        if (consumed < produced || !consumedMessages.equals(expectedMessages)) {
             throw new IllegalStateException(
-                    "Kafka consumer did not drain produced messages. produced=" + produced + " consumed=" + consumed);
+                    "Kafka consumer did not drain produced messages. produced=" + produced
+                            + " consumed=" + consumed
+                            + " expectedMessages=" + expectedMessages
+                            + " consumedMessages=" + consumedMessages);
         }
+    }
+
+    private Set<String> expectedMessages() {
+        return IntStream.rangeClosed(1, messageCount)
+                .mapToObj(sequence -> "message-" + sequence)
+                .collect(Collectors.toUnmodifiableSet());
     }
 }

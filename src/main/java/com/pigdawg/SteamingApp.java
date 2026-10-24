@@ -7,8 +7,8 @@ import java.io.IOException;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.Optional;
 import java.util.Properties;
+import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -34,159 +34,127 @@ public class SteamingApp {
     private static final long CONSUMER_TIMEOUT_MS = Duration.ofMinutes(2).toMillis();
 
     public static void main(String[] args) throws IOException, InterruptedException, ExecutionException {
-        LOG.info("SteamingApp starting");
-        LocalDateTime now = LocalDateTime.now();
-        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMddHHmm");
-        final String nowString = now.format(formatter);
-
-        final String poolName = String.format("kafka-pool-%s", nowString);
-        final String streamName = String.format("kafka-stream-%s", nowString);
-        final String consumerGroupName = String.format("kafka-consumergroup-%s", nowString);
-        LOG.info("Generated names pool={} stream={} consumerGroup={}", poolName, streamName, consumerGroupName);
-
-        OciStreamingHelper.validateAuthenticationToken(ENDPOINT_OCI_IDENTITY, AUTH_PROFILE, TENANT_STREAMING);
-
-        StreamAdminClient adminClient = OciStreamingHelper.createStreamAdminClient(ENDPOINT_OCI_STREAMING, AUTH_PROFILE);
-        LOG.info("Initialized StreamAdminClient for endpoint={}", ENDPOINT_OCI_STREAMING);
-
-        CreateStreamPoolResponse createStreamPoolResponse = null;
-        String streamId = null;
-        Exception primaryFailure = null;
         try {
-            LOG.info("Creating stream pool {} in compartment {}", poolName, COMPARTMENT);
-            createStreamPoolResponse = OciStreamingHelper.createStreamPool(adminClient, COMPARTMENT, poolName);
-            String streamPoolId = createStreamPoolResponse.getStreamPool().getId();
-            LOG.info("Created stream pool id={}", streamPoolId);
-            String kafkaUsername = KafkaStreamingHelper.createStreamPoolUsername(KAFKA_USERNAME_BASE, streamPoolId);
+            LOG.info("SteamingApp starting");
+            LocalDateTime now = LocalDateTime.now();
+            DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMddHHmmssSSS");
+            final String runSuffix = now.format(formatter) + "-" + UUID.randomUUID().toString().substring(0, 8);
 
-            OciStreamingHelper.waitForStreamPoolToBecomeActive(adminClient, streamPoolId, RESOURCE_CREATE_TIMEOUT_MS);
+            final String poolName = String.format("kafka-pool-%s", runSuffix);
+            final String streamName = String.format("kafka-stream-%s", runSuffix);
+            final String consumerGroupName = String.format("kafka-consumergroup-%s", runSuffix);
+            LOG.info("Generated names pool={} stream={} consumerGroup={}", poolName, streamName, consumerGroupName);
 
-            StreamPool streamPool = OciStreamingHelper.getStreamPool(adminClient, streamPoolId).getStreamPool();
-            String bootstrapServers = streamPool.getKafkaSettings() == null
-                    ? null
-                    : streamPool.getKafkaSettings().getBootstrapServers();
-            if (bootstrapServers == null || bootstrapServers.isBlank()) {
-                throw new IllegalStateException("Kafka bootstrap servers were not available for streamPoolId=" + streamPoolId);
-            }
-            LOG.info("Kafka bootstrap servers resolved for streamPoolId={}", streamPoolId);
+            OciStreamingHelper.validateAuthenticationToken(ENDPOINT_OCI_IDENTITY, AUTH_PROFILE, TENANT_STREAMING);
 
-            streamId = createKafkaTopicAndResolveStreamId(
-                    adminClient,
-                    streamPoolId,
-                    bootstrapServers,
-                    streamName,
-                    kafkaUsername);
-            LOG.info("Created Kafka topic as stream id={} in pool={}", streamId, streamPoolId);
+            StreamAdminClient adminClient = OciStreamingHelper.createStreamAdminClient(ENDPOINT_OCI_STREAMING, AUTH_PROFILE);
+            LOG.info("Initialized StreamAdminClient for endpoint={}", ENDPOINT_OCI_STREAMING);
 
-            OciStreamingHelper.waitForStreamToBecomeActive(adminClient, streamId, RESOURCE_CREATE_TIMEOUT_MS);
+            String streamPoolId = null;
+            String streamId = null;
+            String streamNameForCleanup = null;
+            Exception primaryFailure = null;
+            try {
+                LOG.info("Creating stream pool {} in compartment {}", poolName, COMPARTMENT);
+                CreateStreamPoolResponse createStreamPoolResponse =
+                        OciStreamingHelper.createStreamPool(adminClient, COMPARTMENT, poolName);
+                streamPoolId = createStreamPoolResponse.getStreamPool().getId();
+                LOG.info("Created stream pool id={}", streamPoolId);
 
-            final long startMs = System.currentTimeMillis();
-            final long consumerDeadlineMs = startMs + CONSUMER_TIMEOUT_MS;
+                OciStreamingHelper.waitForStreamPoolToBecomeActive(adminClient, streamPoolId, RESOURCE_CREATE_TIMEOUT_MS);
 
-            ProducerConsumerThreads producerConsumerThreads =
-                    new ProducerConsumerThreads(
-                            bootstrapServers,
-                            streamName,
-                            consumerGroupName,
-                            kafkaUsername,
-                            KAFKA_PASSWORD,
-                            KAFKA_TRUSTSTORE_LOCATION,
-                            KAFKA_TRUSTSTORE_PASSWORD,
-                            MESSAGE_COUNT,
-                            consumerDeadlineMs);
-            Thread producerThread = producerConsumerThreads.createProducerThread();
-            Thread consumerThread = producerConsumerThreads.createConsumerThread();
+                String kafkaUsername = KafkaStreamingHelper.createStreamPoolUsername(KAFKA_USERNAME_BASE, streamPoolId);
 
-            LOG.info("Starting Kafka producer and consumer threads for topic={}", streamName);
-            consumerThread.start();
-            producerThread.start();
-            producerThread.join();
-            consumerThread.join();
-            producerConsumerThreads.throwIfFailed();
-            LOG.info(
-                    "Threads completed. produced={} consumed={}",
-                    producerConsumerThreads.getProducedCount(),
-                    producerConsumerThreads.getConsumedCount());
-        } catch (RuntimeException | InterruptedException | ExecutionException ex) {
-            primaryFailure = ex;
-            throw ex;
-        } finally {
-            cleanupResources(adminClient, createStreamPoolResponse, streamId, streamName, primaryFailure);
-        }
+                StreamPool streamPool = OciStreamingHelper.getStreamPool(adminClient, streamPoolId).getStreamPool();
+                String bootstrapServers = streamPool.getKafkaSettings() == null
+                        ? null
+                        : streamPool.getKafkaSettings().getBootstrapServers();
+                if (bootstrapServers == null || bootstrapServers.isBlank()) {
+                    throw new IllegalStateException("Kafka bootstrap servers were not available for streamPoolId=" + streamPoolId);
+                }
+                LOG.info("Kafka bootstrap servers resolved for streamPoolId={}", streamPoolId);
 
-        LOG.info("SteamingApp done");
-    }
+                streamNameForCleanup = streamName;
+                streamId = createKafkaTopicAndResolveStreamId(
+                        adminClient,
+                        streamPoolId,
+                        bootstrapServers,
+                        streamName,
+                        kafkaUsername);
+                LOG.info("Created Kafka topic as stream id={} in pool={}", streamId, streamPoolId);
 
-    private static String createKafkaTopicAndResolveStreamId(
-            StreamAdminClient adminClient,
-            String streamPoolId,
-            String bootstrapServers,
-            String streamName,
-            String kafkaUsername)
-            throws ExecutionException, InterruptedException {
-        LOG.info("Creating Kafka topic={} in streamPoolId={}", streamName, streamPoolId);
-        try {
-            KafkaStreamingHelper.createTopic(
-                    bootstrapServers,
-                    streamName,
-                    kafkaUsername,
-                    KAFKA_PASSWORD,
-                    KAFKA_TRUSTSTORE_LOCATION,
-                    KAFKA_TRUSTSTORE_PASSWORD,
-                    1);
-        } catch (ExecutionException ex) {
-            Optional<String> recoveredStreamId = OciStreamingHelper.findStreamInPoolByName(
-                            adminClient,
-                            COMPARTMENT,
-                            streamPoolId,
-                            streamName)
-                    .map(streamSummary -> streamSummary.getId());
-            if (recoveredStreamId.isEmpty()) {
+                OciStreamingHelper.waitForStreamToBecomeActive(adminClient, streamId, RESOURCE_CREATE_TIMEOUT_MS);
+
+                final long startMs = System.currentTimeMillis();
+                final long consumerDeadlineMs = startMs + CONSUMER_TIMEOUT_MS;
+
+                ProducerConsumerThreads producerConsumerThreads =
+                        new ProducerConsumerThreads(
+                                bootstrapServers,
+                                streamName,
+                                consumerGroupName,
+                                kafkaUsername,
+                                KAFKA_PASSWORD,
+                                KAFKA_TRUSTSTORE_LOCATION,
+                                KAFKA_TRUSTSTORE_PASSWORD,
+                                MESSAGE_COUNT,
+                                consumerDeadlineMs);
+                Thread producerThread = producerConsumerThreads.createProducerThread();
+                Thread consumerThread = producerConsumerThreads.createConsumerThread();
+
+                LOG.info("Starting Kafka producer and consumer threads for topic={}", streamName);
+                consumerThread.start();
+                producerThread.start();
+                producerThread.join();
+                consumerThread.join();
+                producerConsumerThreads.throwIfFailed();
+                LOG.info(
+                        "Threads completed. produced={} consumed={}",
+                        producerConsumerThreads.getProducedCount(),
+                        producerConsumerThreads.getConsumedCount());
+            } catch (RuntimeException | InterruptedException | ExecutionException ex) {
+                primaryFailure = ex;
                 throw ex;
+            } finally {
+                cleanupResources(adminClient, streamPoolId, streamId, streamNameForCleanup, primaryFailure);
             }
-
-            LOG.warn(
-                    "Kafka topic creation reported an error, but the stream exists. streamPoolId={} streamName={} streamId={}",
-                    streamPoolId,
-                    streamName,
-                    recoveredStreamId.get(),
-                    ex);
+        } finally {
+            LOG.info("SteamingApp done");
         }
-
-        return OciStreamingHelper.waitForStreamInPoolByName(
-                    adminClient,
-                    COMPARTMENT,
-                    streamPoolId,
-                    streamName,
-                    RESOURCE_CREATE_TIMEOUT_MS);
     }
 
     private static void cleanupResources(
             StreamAdminClient adminClient,
-            CreateStreamPoolResponse createStreamPoolResponse,
+            String streamPoolId,
             String streamId,
             String streamName,
             Exception primaryFailure)
             throws InterruptedException {
         Exception cleanupFailure = null;
-        String streamPoolId = createStreamPoolResponse == null ? null : createStreamPoolResponse.getStreamPool().getId();
-        String streamIdToDelete = resolveStreamIdForCleanup(adminClient, streamPoolId, streamId, streamName);
-        boolean streamDeleted = streamIdToDelete == null;
+        boolean streamDeleted = streamId == null;
+        try {
+            streamId = resolveStreamIdForCleanup(adminClient, streamPoolId, streamId, streamName);
+            streamDeleted = streamId == null;
+        } catch (RuntimeException | InterruptedException ex) {
+            streamDeleted = false;
+            cleanupFailure = rememberCleanupFailure(primaryFailure, cleanupFailure, ex);
+            LOG.warn("Stream resolution for cleanup failed. streamPoolId={} streamName={}", streamPoolId, streamName, ex);
+        }
 
-        if (streamIdToDelete != null) {
+        if (streamId != null) {
             try {
-                OciStreamingHelper.waitForStreamToBecomeActive(adminClient, streamIdToDelete, RESOURCE_DELETE_TIMEOUT_MS);
-                LOG.info("Deleting stream id={}", streamIdToDelete);
-                OciStreamingHelper.deleteStream(adminClient, streamIdToDelete);
-                OciStreamingHelper.waitForStreamToBecomeDeleted(adminClient, streamIdToDelete, RESOURCE_DELETE_TIMEOUT_MS);
+                OciStreamingHelper.waitForStreamToBecomeActive(adminClient, streamId, RESOURCE_DELETE_TIMEOUT_MS);
+                LOG.info("Deleting stream id={}", streamId);
+                OciStreamingHelper.deleteStream(adminClient, streamId);
+                OciStreamingHelper.waitForStreamToBecomeDeleted(adminClient, streamId, RESOURCE_DELETE_TIMEOUT_MS);
                 streamDeleted = true;
             } catch (RuntimeException | InterruptedException ex) {
                 cleanupFailure = rememberCleanupFailure(primaryFailure, cleanupFailure, ex);
-                LOG.warn("Stream deletion was not confirmed. streamId={}", streamIdToDelete, ex);
+                LOG.warn("Stream deletion was not confirmed. streamId={}", streamId, ex);
             }
         }
 
-        if (createStreamPoolResponse != null) {
+        if (streamPoolId != null) {
             if (streamDeleted) {
                 try {
                     LOG.info("Deleting stream pool id={}", streamPoolId);
@@ -202,24 +170,6 @@ public class SteamingApp {
         }
 
         throwCleanupFailureIfNoPrimaryFailure(primaryFailure, cleanupFailure);
-    }
-
-    private static String resolveStreamIdForCleanup(
-            StreamAdminClient adminClient,
-            String streamPoolId,
-            String streamId,
-            String streamName) {
-        if (streamId != null || streamPoolId == null) {
-            return streamId;
-        }
-
-        return OciStreamingHelper.findStreamInPoolByName(adminClient, COMPARTMENT, streamPoolId, streamName)
-                .map(streamSummary -> {
-                    LOG.info("Resolved Kafka-created stream for cleanup. streamPoolId={} streamName={} streamId={}",
-                            streamPoolId, streamName, streamSummary.getId());
-                    return streamSummary.getId();
-                })
-                .orElse(null);
     }
 
     private static Exception rememberCleanupFailure(
@@ -261,5 +211,89 @@ public class SteamingApp {
         }
 
         throw new IllegalStateException("Cleanup failed", cleanupFailure);
+    }
+
+    private static String createKafkaTopicAndResolveStreamId(
+            StreamAdminClient adminClient,
+            String streamPoolId,
+            String bootstrapServers,
+            String streamName,
+            String kafkaUsername)
+            throws ExecutionException, InterruptedException {
+        LOG.info("Creating Kafka topic={} in streamPoolId={}", streamName, streamPoolId);
+        try {
+            KafkaStreamingHelper.createTopic(
+                    bootstrapServers,
+                    streamName,
+                    kafkaUsername,
+                    KAFKA_PASSWORD,
+                    KAFKA_TRUSTSTORE_LOCATION,
+                    KAFKA_TRUSTSTORE_PASSWORD,
+                    1);
+        } catch (ExecutionException ex) {
+            return recoverStreamIdAfterTopicCreationError(adminClient, streamPoolId, streamName, ex);
+        }
+
+        return OciStreamingHelper.waitForStreamInPoolByName(
+                adminClient,
+                COMPARTMENT,
+                streamPoolId,
+                streamName,
+                RESOURCE_CREATE_TIMEOUT_MS);
+    }
+
+    private static String recoverStreamIdAfterTopicCreationError(
+            StreamAdminClient adminClient,
+            String streamPoolId,
+            String streamName,
+            ExecutionException topicCreationFailure)
+            throws ExecutionException {
+        try {
+            String recoveredStreamId = OciStreamingHelper.waitForStreamInPoolByName(
+                    adminClient,
+                    COMPARTMENT,
+                    streamPoolId,
+                    streamName,
+                    RESOURCE_CREATE_TIMEOUT_MS);
+            LOG.warn(
+                    "Kafka topic creation reported an error, but the stream exists. streamPoolId={} streamName={} streamId={}",
+                    streamPoolId,
+                    streamName,
+                    recoveredStreamId,
+                    topicCreationFailure);
+            return recoveredStreamId;
+        } catch (RuntimeException recoveryFailure) {
+            topicCreationFailure.addSuppressed(recoveryFailure);
+            throw topicCreationFailure;
+        } catch (InterruptedException recoveryFailure) {
+            Thread.currentThread().interrupt();
+            topicCreationFailure.addSuppressed(recoveryFailure);
+            throw topicCreationFailure;
+        }
+    }
+
+    private static String resolveStreamIdForCleanup(
+            StreamAdminClient adminClient,
+            String streamPoolId,
+            String streamId,
+            String streamName)
+            throws InterruptedException {
+        if (streamId != null || streamPoolId == null) {
+            return streamId;
+        }
+
+        if (streamName == null) {
+            return null;
+        }
+
+        String resolvedStreamId = OciStreamingHelper.waitForStreamInPoolByName(
+                adminClient,
+                COMPARTMENT,
+                streamPoolId,
+                streamName,
+                RESOURCE_DELETE_TIMEOUT_MS);
+        LOG.info("Resolved Kafka-created stream for cleanup. streamPoolId={} streamName={} streamId={}",
+                streamPoolId, streamName, resolvedStreamId);
+        return resolvedStreamId;
     }
 }

@@ -13,10 +13,12 @@ This is a small Java 17 Maven project named `simple-oci-streaming-client-kafka`.
 ## Paired Example Consistency
 
 - This repository is paired with `https://github.com/slessard/simple-oci-streaming-client-rest`.
-- Keep the REST and Kafka examples as similar as possible so readers can compare the two OCI Streaming APIs directly.
-- When behavior is shared, prefer identical names, method order, control flow, logging shape, constants, and helper structure across both repositories.
-- Allow differences only where the REST and Kafka APIs require them, such as cursor handling, Kafka topic creation, client configuration, and stream ID resolution.
-- When changing one repository, inspect the paired repository and make the corresponding change there whenever it applies.
+- The primary teaching goal is side-by-side comparison: readers should see how choosing Kafka instead of REST changes an application's implementation.
+- Keep the applications structurally aligned. Prefer line-by-line identical code for shared behavior, including naming, method order, lifecycle orchestration, thread coordination, logging structure, and error handling.
+- Keep meaningful API differences explicit and easy to compare: REST cursors and SDK message operations versus Kafka bootstrap discovery, authentication, topic creation, and stream ID recovery.
+- Favor simple, direct implementations. Textual identity is a preference, not an overriding requirement; do not introduce abstraction layers, dummy operations, unused parameters, or extra behavior just to make the files match.
+- Use focused helpers where they clarify API-specific work without hiding the differences the examples are intended to teach. Preserve repository-specific REST or Kafka behavior.
+- When changing either example, inspect its companion and mirror applicable changes. Compare the resulting files to remove incidental differences while retaining meaningful API differences.
 
 Key files:
 
