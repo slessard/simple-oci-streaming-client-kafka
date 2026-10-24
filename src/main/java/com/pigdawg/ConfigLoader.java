@@ -24,6 +24,13 @@ final class ConfigLoader {
         }
     }
 
+    static String getAdminEndpoint(Properties properties) {
+        String override = properties.getProperty("oci.streaming.admin.endpoint");
+        return override == null || override.isBlank()
+                ? getRequiredProperty(properties, "oci.streaming.endpoint")
+                : override;
+    }
+
     static String getRequiredProperty(Properties properties, String key) {
         String value = properties.getProperty(key);
         if (value == null || value.isBlank()) {

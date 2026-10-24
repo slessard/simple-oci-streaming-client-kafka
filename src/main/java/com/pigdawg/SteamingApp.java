@@ -19,6 +19,7 @@ public class SteamingApp {
     private static final Properties APP_PROPERTIES = ConfigLoader.loadApplicationProperties(SteamingApp.class);
 
     private static final String ENDPOINT_OCI_STREAMING = ConfigLoader.getRequiredProperty(APP_PROPERTIES, "oci.streaming.endpoint");
+    private static final String ENDPOINT_OCI_STREAMING_ADMIN = ConfigLoader.getAdminEndpoint(APP_PROPERTIES);
     private static final String ENDPOINT_OCI_IDENTITY = ConfigLoader.getRequiredProperty(APP_PROPERTIES, "oci.identity.endpoint");
     private static final String TENANT_STREAMING = ConfigLoader.getRequiredProperty(APP_PROPERTIES, "oci.streaming.tenancy");
     private static final String COMPARTMENT = ConfigLoader.getRequiredProperty(APP_PROPERTIES, "oci.streaming.compartment");
@@ -47,8 +48,8 @@ public class SteamingApp {
 
             OciStreamingHelper.validateAuthenticationToken(ENDPOINT_OCI_IDENTITY, AUTH_PROFILE, TENANT_STREAMING);
 
-            StreamAdminClient adminClient = OciStreamingHelper.createStreamAdminClient(ENDPOINT_OCI_STREAMING, AUTH_PROFILE);
-            LOG.info("Initialized StreamAdminClient for endpoint={}", ENDPOINT_OCI_STREAMING);
+            StreamAdminClient adminClient = OciStreamingHelper.createStreamAdminClient(ENDPOINT_OCI_STREAMING_ADMIN, AUTH_PROFILE);
+            LOG.info("Initialized StreamAdminClient for endpoint={}", ENDPOINT_OCI_STREAMING_ADMIN);
 
             String streamPoolId = null;
             String streamId = null;

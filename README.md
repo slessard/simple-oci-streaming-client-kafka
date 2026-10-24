@@ -39,6 +39,16 @@ Optional Kafka properties:
 - `oci.kafka.truststore.location`
 - `oci.kafka.truststore.password`
 
+### Separate control-plane endpoint
+
+Set the optional `oci.streaming.admin.endpoint` property to use a separate
+management frontend for stream pool and stream administration. When omitted or
+blank, admin operations use `oci.streaming.endpoint`.
+
+The REST data-plane client continues to use `oci.streaming.endpoint`. Kafka
+bootstrap servers come from the created stream pool's Kafka settings.
+The sample flow remains create, produce, consume, and clean up.
+
 ## Run it
 
 From the repository root:
